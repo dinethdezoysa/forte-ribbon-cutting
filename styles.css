@@ -110,12 +110,12 @@ body.is-host.idle { cursor: none; }
 .segments span.on { background: var(--green); }
 
 /* participants */
-.people { position: absolute; top: 860px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; }
-.pcard { position: relative; width: 324px; height: 128px; padding: 18px 20px; border-radius: 14px; text-align: left;
+.people { position: absolute; top: 860px; left: 0; right: 0; display: flex; justify-content: center; gap: 14px; }
+.pcard { position: relative; width: 250px; height: 128px; padding: 18px 16px; border-radius: 14px; text-align: left;
   background: #FFFFFF; border: 1px solid #D5E6ED; box-shadow: 0 8px 24px rgba(20,60,90,.12); color: var(--navy); transition: border-color .5s, background .5s; }
 .pnum { font-size: 14px; color: var(--navy2); letter-spacing: .2em; font-weight: 500; }
-.pname { margin-top: 4px; font-size: 20px; font-weight: 600; letter-spacing: .03em; line-height: 1.2; min-height: 26px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pill { position: absolute; left: 20px; bottom: 16px; height: 30px; padding: 0 14px; border-radius: 999px; display: inline-flex; align-items: center;
+.pname { margin-top: 4px; font-size: 19px; font-weight: 600; letter-spacing: .02em; line-height: 1.2; min-height: 26px; overflow: hidden; }
+.pill { position: absolute; left: 16px; bottom: 16px; height: 30px; padding: 0 14px; border-radius: 999px; display: inline-flex; align-items: center;
   font-size: 14px; font-weight: 600; letter-spacing: .16em; border: 1px solid rgba(20,48,77,.30); color: var(--navy2); transition: all .5s; }
 .pill-r { display: none; }
 .pcard.ready { border-color: #1E9E62; background: #DDF5E8; }

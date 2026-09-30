@@ -16,7 +16,7 @@
           "$run": {
             ".read": true,
             "$pid": {
-              ".write": "!data.exists() && newData.exists() && $pid.matches(/^(sergei|chandana|vannary|kgisl|channtharong)$/) && $run === root.child('ceremonies').child($session).child('control').child('run').val() && !root.child('ceremonies').child($session).child('cut').child($run).exists()",
+              ".write": "!data.exists() && newData.exists() && $pid.matches(/^(sergei|chandana|vannary|kgisl|channtharong|chenda|nirorn)$/) && $run === root.child('ceremonies').child($session).child('control').child('run').val() && !root.child('ceremonies').child($session).child('cut').child($run).exists()",
               ".validate": "newData.hasChildren(['at'])",
               "at": { ".validate": "newData.val() === now" },
               "$other": { ".validate": false }
@@ -26,7 +26,7 @@
         "cut": {
           "$run": {
             ".read": true,
-            ".write": "!data.exists() && newData.exists() && $run === root.child('ceremonies').child($session).child('control').child('run').val() && root.child('ceremonies').child($session).child('activations').child($run).hasChildren(['sergei', 'chandana', 'vannary', 'kgisl', 'channtharong'])",
+            ".write": "!data.exists() && newData.exists() && $run === root.child('ceremonies').child($session).child('control').child('run').val() && root.child('ceremonies').child($session).child('activations').child($run).hasChildren(['sergei', 'chandana', 'vannary', 'kgisl', 'channtharong', 'chenda', 'nirorn'])",
             ".validate": "newData.hasChildren(['at'])",
             "at": { ".validate": "newData.val() === now" },
             "$other": { ".validate": false }
@@ -36,7 +36,7 @@
           ".read": true,
           "$pid": {
             "$conn": {
-              ".write": "$pid.matches(/^(sergei|chandana|vannary|kgisl|channtharong)$/) && $conn.matches(/^c[a-z0-9]+$/) && $conn.length <= 30",
+              ".write": "$pid.matches(/^(sergei|chandana|vannary|kgisl|channtharong|chenda|nirorn)$/) && $conn.matches(/^c[a-z0-9]+$/) && $conn.length <= 30",
               ".validate": "newData.isNumber()"
             }
           }

@@ -43,10 +43,12 @@ window.FORTE_CONFIG = {
      --------------------------------------------------------------- */
   participants: [
     { id: "vannary", name: "MENG VANNARY" },
+    { id: "chenda", name: "CHENDA" },
     { id: "chandana", name: "CHANDANA JAYASOORIYA" },
     { id: "channtharong", name: "SUY CHANNTHARONG" },
+    { id: "nirorn", name: "NIRORN" },
     { id: "sergei",   name: "SERGEI KOROL" },
-    { id: "kgisl",    name: "MANOJ | KGISL" }
+    { id: "kgisl",    name: "MANOJ (KGISL)" }
   ],
 
   /* ---------------------------------------------------------------

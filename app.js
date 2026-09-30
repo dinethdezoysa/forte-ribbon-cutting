@@ -4,7 +4,7 @@
 
    ceremonies/<session>/control      { run, rehearsal, k }   (host only, key-protected)
    ceremonies/<session>/activations/<run>/<participant>  { at }   (create-once)
-   ceremonies/<session>/cut/<run>    { at }   (create-once, only when all 5 exist)
+   ceremonies/<session>/cut/<run>    { at }   (create-once, only when all participants exist)
    ceremonies/<session>/presence/<participant>/<conn>     (who has their page open)
 
    Every reset creates a new <run>, so old activations never count again.
@@ -305,7 +305,7 @@
     return n;
   }
   // Any client may propose the cut; the database accepts it only once per run
-  // and only when all five activations exist.
+  // and only when all participants' activations exist.
   // While our own proposal is in flight we ignore the locally-echoed value and
   // only start the ceremony from the server-confirmed record.
   var cutTried = {}, cutPending = {};
@@ -459,12 +459,12 @@
     }
     if (hostKey) {
     $('#btnReset').onclick = function () {
-      dialog('Reset the ribbon-cutting ceremony?', 'All five participants will return to WAITING and the ribbon will be restored.', 'Reset ceremony').then(function (ok) { if (ok) hostWrite(st.rehearsal); });
+      dialog('Reset the ribbon-cutting ceremony?', 'All participants will return to WAITING and the ribbon will be restored.', 'Reset ceremony').then(function (ok) { if (ok) hostWrite(st.rehearsal); });
     };
     $('#btnReh').onclick = function () {
       var to = !st.rehearsal;
       dialog(to ? 'Switch to REHEARSAL mode?' : 'Switch to the LIVE ceremony?',
-        (to ? 'A REHEARSAL indicator will be shown. ' : 'The REHEARSAL indicator will be removed. ') + 'The ceremony is reset and all five participants return to WAITING.',
+        (to ? 'A REHEARSAL indicator will be shown. ' : 'The REHEARSAL indicator will be removed. ') + 'The ceremony is reset and all participants return to WAITING.',
         to ? 'Start rehearsal' : 'Go to live ceremony').then(function (ok) { if (ok) hostWrite(to); });
     };
     $('#btnFs').onclick = function () {

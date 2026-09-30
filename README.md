@@ -70,10 +70,12 @@ https://YOUR-SITE/?session=cms-medical-2026&mode=host&key=forte-z45v6zcq8m
 **Participants** (send each person only their own link)
 ```
 MENG VANNARY         https://YOUR-SITE/?session=cms-medical-2026&participant=vannary
+CHENDA               https://YOUR-SITE/?session=cms-medical-2026&participant=chenda
 CHANDANA             https://YOUR-SITE/?session=cms-medical-2026&participant=chandana
 SUY CHANNTHARONG     https://YOUR-SITE/?session=cms-medical-2026&participant=channtharong
+NIRORN               https://YOUR-SITE/?session=cms-medical-2026&participant=nirorn
 SERGEI KOROL         https://YOUR-SITE/?session=cms-medical-2026&participant=sergei
-MANOJ | KGISL        https://YOUR-SITE/?session=cms-medical-2026&participant=kgisl
+MANOJ (KGISL)        https://YOUR-SITE/?session=cms-medical-2026&participant=kgisl
 ```
 Only a host with the key can open a session. Someone who types a random `session=` value can't activate anything.
 
