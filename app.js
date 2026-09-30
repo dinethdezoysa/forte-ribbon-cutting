@@ -31,11 +31,11 @@
   var INPUT = String(Q.get('input') || '').toLowerCase();
   var TOUCH = INPUT === 'button' ? true : INPUT === 'keys' ? false :
     !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
-  var MUSIC_BACK = 1400; // ms after the confetti bursts before the calm music fades back in
   var WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 
   // Ceremony timeline, in ms after the 5th confirmation reaches the server.
   // The countdown runs 10 → 1 (one number per second), then the ribbon cuts.
+  var FIN_MUSIC = 3400;   // ms after the trumpets start: the trumpet clip ends, the background music carries on
   var COUNT_FROM = 10;
   var REDIRECT_DELAY = 1500; // ms the participant sees READY before moving to the host screen
   // Where the scissors cut: the dash in "Forte – Live with confidence". The phrase itself is
@@ -47,6 +47,7 @@
   // then dissolves into the final LIVE screen (config.js › systemScreenshotUrl).
   var SYS = !!C.systemScreenshotUrl;
   if (SYS) TL.live = TL.cut + 8300;
+  TL.fan = SYS ? TL.sys : TL.split;   // the trumpets play as the system screenshot (login page) appears
 
   var root = document.getElementById('root');
 
@@ -66,7 +67,7 @@
   // click / tap / key press and unlocks everything then.
   var Snd = (function () {
     var ctx = null, master = null, sess = null, unlocked = false, muted = false, ducked = false,
-        wanted = false, on = false, chordT = null, fan = null, fanUrl = '', fanState = 'none', fanT0 = 0, holdT = null, pos = 0, nextT = 0, step = 0, cb = null, armed = false;
+        wanted = false, forced = false, on = false, chordT = null, fan = null, fanUrl = '', fanState = 'none', fanT0 = 0, fin = null, finUrl = '', finState = 'none', holdT = null, pos = 0, nextT = 0, step = 0, cb = null, armed = false;
     // a slow, soft progression: Cmaj7 · Am · Fmaj7 · G
     var CHORDS = [[130.81, 196.00, 246.94, 329.63], [110.00, 164.81, 220.00, 261.63],
                   [87.31, 174.61, 220.00, 329.63], [98.00, 146.83, 196.00, 293.66]];
@@ -74,7 +75,7 @@
     var GESTURES = ['pointerdown', 'click', 'touchend', 'keydown'];
 
     function notify() { if (cb) cb(); }
-    function level() { return (ducked ? 0.5 : 1) * 0.15; }   // background music level (1 = full)
+    function level() { return (ducked ? 0.5 : 1) * 0.195; }   // background music level (1 = full)
     function note(dest, f, t, dur, peak, atk) {
       var o = ctx.createOscillator(), g = ctx.createGain();
       o.type = 'sine'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 8;
@@ -92,7 +93,7 @@
     }
     function apply() {
       if (!ctx || !unlocked) return;
-      var want = wanted && !muted, now = ctx.currentTime, g;
+      var want = wanted && (!muted || forced), now = ctx.currentTime, g;
       // give the music file a moment to download and decode before falling back to the synth pad
       if (want && !on && fanState === 'loading' && Date.now() - fanT0 < 10000) { clearTimeout(holdT); holdT = setTimeout(apply, 250); return; }
       if (want && !on) {
@@ -127,12 +128,12 @@
       if (!ctx) {
         var AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
-        try { ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.12; master.connect(ctx.destination); } catch (e) { ctx = null; return; }
+        try { ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.06; master.connect(ctx.destination); } catch (e) { ctx = null; return; }
         // iOS / Safari only let speech run later if it was first started from a gesture
         try { var u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u); } catch (e) {}
       }
       function after() {
-        if (ctx.state === 'running' && !unlocked) { unlocked = true; loadFan(); apply(); }
+        if (ctx.state === 'running' && !unlocked) { unlocked = true; loadFan(); loadFin(); apply(); }
         if (ready()) disarm();
         notify();
       }
@@ -162,6 +163,14 @@
         .then(function (ab) { return new Promise(function (ok, no) { ctx.decodeAudioData(ab, ok, no); }); })
         .then(function (b) { fan = b; fanState = 'ready'; }, function () { fanState = 'failed'; });
     }
+    // Finale fanfare (config.js › finaleUrl): a one-shot played when the ribbon is cut.
+    function loadFin() {
+      if (!finUrl || finState !== 'none' || !ctx || !window.fetch) return;
+      finState = 'loading';
+      fetch(finUrl).then(function (r) { if (!r.ok) throw 0; return r.arrayBuffer(); })
+        .then(function (ab) { return new Promise(function (ok, no) { ctx.decodeAudioData(ab, ok, no); }); })
+        .then(function (b) { fin = b; finState = 'ready'; }, function () { finState = 'failed'; });
+    }
     function pickVoice() {
       var vs = (window.speechSynthesis && window.speechSynthesis.getVoices()) || [], best = null;
       vs.forEach(function (v) {
@@ -181,20 +190,28 @@
       },
       unlock: unlock,
       state: function () { return !ready() ? 'locked' : muted ? 'muted' : 'on'; },
-      setMuted: function (m) { muted = !!m; if (muted) { try { window.speechSynthesis.cancel(); } catch (e) {} } apply(); notify(); },
-      ambient: function (v) { v = !!v; if (wanted === v) return; wanted = v; if (!v) ducked = false; apply(); },
+      isMuted: function () { return muted; },
+      setMuted: function (m) { muted = !!m; apply(); notify(); },   // mutes only the pre-cut background music
+      ambient: function (v) { v = !!v; var wasForced = forced; forced = false; if (wanted === v && !wasForced) return; wanted = v; if (!v) ducked = false; apply(); },
+      // the music for the celebration + final page: the mute button (first page only) no longer applies
+      final: function () { forced = true; wanted = true; apply(); },
       duck: function (v) { v = !!v; if (ducked === v) return; ducked = v; apply(); },
       setFanfare: function (url) { fanUrl = url || ''; loadFan(); },
+      setFinale: function (url) { finUrl = url || ''; loadFin(); },
+      finale: function () {
+        if (!unlocked || !fin) return;
+        var src = ctx.createBufferSource(); src.buffer = fin; src.connect(master); src.start(ctx.currentTime + 0.02);
+      },
       pop: function (n) {
-        if (!unlocked || muted) return;
+        if (!unlocked) return;
         for (var i = 0; i < (n || 1); i++) one(ctx.currentTime + 0.02 + i * (0.1 + Math.random() * 0.08), 1 - i * 0.12);
       },
       say: function (text) {
-        if (!unlocked || muted || !window.speechSynthesis) return;
+        if (!unlocked || !window.speechSynthesis) return;
         try {
           var ss = window.speechSynthesis; if (ss.speaking) ss.cancel();
           var u = new SpeechSynthesisUtterance(text), v = pickVoice();
-          u.lang = 'en-US'; u.rate = 1; u.pitch = 1.05; u.volume = 0.2; if (v) u.voice = v;
+          u.lang = 'en-US'; u.rate = 1; u.pitch = 1.05; u.volume = 0.12; if (v) u.voice = v;
           ss.speak(u);
         } catch (e) {}
       }
@@ -203,8 +220,10 @@
 
   // Notification shown on every screen until sound is enabled. One click on it unlocks audio,
   // and the music then starts by itself (the page already asked for it), so nobody has to hunt for a setting.
+  var SND_ON = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" fill="currentColor"/><path d="M15.5 9a4 4 0 010 6M18 6.5a8 8 0 010 11"/></svg>';
+  var SND_OFF = '<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>';
   function soundBanner() {
-    Snd.setFanfare(C.musicUrl);
+    Snd.setFanfare(C.musicUrl); Snd.setFinale(C.finaleUrl);
     if (!C.showSoundPrompt) { Snd.arm(function () {}); return; }   // silent mode: sound starts on the first click / tap / key press
     var el = document.createElement('div');
     el.className = 'snd-banner'; el.setAttribute('role', 'alert');
@@ -359,7 +378,7 @@
         '</section>' +
         tunnelSVG() + ribbonSVG() + scissorsSVG() +
         '<section class="status">' +
-          '<div class="count"><b id="cnt">0</b><span> / ' + TOTAL + ' READY</span>' +
+          '<div class="count"><button type="button" class="snd-btn" id="btnSnd" aria-label="Mute sound" title="Mute / unmute sound">' + SND_ON + '</button><b id="cnt">0</b><span> / ' + TOTAL + ' READY</span>' +
             (canStart ? '<button type="button" class="play-btn" id="btnPlay" disabled title="Start the countdown" aria-label="Start the countdown"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg></button>' : '') + '</div>' +
           '<div class="segments" id="segs">' + segs + '</div>' +
         '</section>' +
@@ -396,6 +415,10 @@
 
     var fx = FX($('#fx'));
     var st = null, seqRun = null, seq = null, initTried = false;
+    $('#btnSnd').onclick = function () {
+      var m = !Snd.isMuted(); Snd.setMuted(m);
+      this.innerHTML = m ? SND_OFF : SND_ON; this.classList.toggle('off', m); this.setAttribute('aria-label', m ? 'Unmute sound' : 'Mute sound');
+    };
     if (canStart) $('#btnPlay').onclick = function () { startCut(st, render, function (e) { toast(e && e.code === 'PERMISSION_DENIED' ? 'Start rejected by the database. Republish database.rules.json in Firebase.' : 'Could not start: ' + ((e && e.message) || 'unknown error')); }); };
     st = watchCeremony(render);
 
@@ -407,6 +430,7 @@
       $all('#segs span').forEach(function (s, i) { s.classList.toggle('on', i < n); });
       stage.classList.toggle('all-ready', n === TOTAL);
       if (canStart) { var pb = $('#btnPlay'); pb.disabled = !(st.run && st.connected && !st.cut); pb.style.display = st.cut ? 'none' : ''; }
+      $('#btnSnd').style.display = st.cut ? 'none' : '';
       $all('.pcard').forEach(function (c) {
         var id = c.getAttribute('data-id');
         var was = c.classList.contains('ready');
@@ -490,14 +514,15 @@
       var s = stage.classList;
       s.add('locked');
       if (el >= TL.live) {                 // host refreshed after the cut → final screen
-        Snd.ambient(true);
+        Snd.final();
         s.add('seq-split', 'seq-live', 'instant');
         fx.rain(true);
         return;
       }
       if (el >= TL.cut) {                  // refreshed during the cut → ribbon already cut
         Snd.ambient(false);
-        seq.at(TL.split + MUSIC_BACK, function () { Snd.ambient(true); });
+        seq.at(TL.fan, function () { Snd.finale(); }, 1500);
+        seq.at(TL.fan + FIN_MUSIC, function () { Snd.final(); });
         s.add('seq-split', 'instant');
         seq.after(80, function () { s.remove('instant'); });
         if (SYS) seq.at(TL.sys, function () { s.add('seq-sys'); });
@@ -514,7 +539,9 @@
       seq.at(TL.cut, function () { s.add('seq-cut'); Snd.ambient(false); });
       seq.at(TL.close, function () { s.add('seq-close'); });
       seq.at(TL.split, function () { s.add('seq-split'); fx.sparks(CUT_X, 534); fx.confetti(170); Snd.pop(2); });
-      seq.at(TL.split + MUSIC_BACK, function () { Snd.ambient(true); });   // calm music returns after the bursts and carries on through the final page
+      seq.at(TL.fan, function () { Snd.finale(); }, 1500);   // the trumpets start as the login page appears
+      seq.at(TL.fan + 1300, function () { fx.confetti(90); }, 1500);   // second confetti wave as the long trumpet note opens
+      seq.at(TL.fan + FIN_MUSIC, function () { Snd.final(); });   // when the trumpets end the music carries on through the final page
       if (SYS) seq.at(TL.sys, function () { s.add('seq-sys'); fx.confetti(60); });
       seq.at(TL.live, function () { s.add('seq-live'); fx.rain(true); });
       seq.start();
@@ -867,7 +894,7 @@
       if (seqT) seqT.stop();
       seqT = Ticker(cutAt);
       var el = B.serverNow() - cutAt;
-      if (el >= TL.split) { Snd.ambient(true); setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); return; }
+      if (el >= TL.fan + FIN_MUSIC) { Snd.final(); setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); return; }
       setView('seq', 'STATUS: <b class="ok">' + readyCount(st) + ' / ' + TOTAL + ' READY</b>');
       $('#pseqmsg').textContent = 'The ribbon cutting begins'; $('#pseqnum').textContent = '';
       function showNum(txt) { var n = $('#pseqnum'); n.textContent = txt; n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); }
@@ -878,7 +905,8 @@
       });
       seqT.at(TL.cut, function () { showNum('CUT!'); Snd.ambient(false); }, 1000);
       seqT.at(TL.split, function () { Snd.pop(2); }, 600);
-      seqT.at(TL.split + MUSIC_BACK, function () { Snd.ambient(true); });
+      seqT.at(TL.fan, function () { Snd.finale(); }, 1500);
+      seqT.at(TL.fan + FIN_MUSIC, function () { Snd.final(); });
       seqT.at(TL.split + 600, function () { setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); });
       seqT.start();
     }

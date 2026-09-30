@@ -104,6 +104,11 @@ body.is-host.idle { cursor: none; }
 .status { position: absolute; top: 740px; left: 0; right: 0; text-align: center; }
 .status-label { font-size: 18px; letter-spacing: .34em; color: var(--navy2); font-weight: 500; margin-left: .34em; }
 .count { margin-top: 2px; font-size: 40px; font-weight: 600; letter-spacing: .04em; color: var(--navy); }
+.snd-btn { vertical-align: middle; margin-right: 18px; width: 40px; height: 40px; border-radius: 50%; padding: 0; cursor: pointer; position: relative; top: -2px;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff; background: var(--red); border: 0;
+  box-shadow: 0 4px 10px rgba(120,0,35,.35); transition: background .2s, color .2s, transform .12s; }
+.snd-btn:hover { background: var(--red-d); }
+.snd-btn:active { transform: scale(.94); box-shadow: 0 2px 5px rgba(120,0,35,.35); }
 .play-btn { vertical-align: middle; margin-left: 18px; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; position: relative; top: -2px;
   display: inline-flex; align-items: center; justify-content: center; color: #fff; background: var(--red); box-shadow: 0 4px 10px rgba(120,0,35,.35);
   transition: background .2s, transform .12s, box-shadow .12s; }

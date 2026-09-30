@@ -24,9 +24,11 @@ window.FORTE_CONFIG = {
      --------------------------------------------------------------- */
   defaultSession: "cms-medical-2026",
 
-  /* Background music (an mp3 in assets/): plays until the ribbon is cut, goes quiet for the
-     balloon bursts, then carries on through the final page. Missing file = a soft built-in pad. */
+  /* Background music (an mp3 in assets/): plays until the ribbon is cut, then stops. Missing file = a soft built-in pad. */
   musicUrl: "assets/alex-morgan-event-grand-opening-fanfare-578493.mp3",
+
+  /* Finale fanfare (an mp3 in assets/): plays once when the ribbon is cut. */
+  finaleUrl: "assets/aberrantrealities-loud-fanfare-trumpet-effect-01-412045.mp3",
 
   /* Show an on-page "Enable sound" notification until sound is unlocked?
      false = no notification; sound starts on the page's first click / tap / key press. */
