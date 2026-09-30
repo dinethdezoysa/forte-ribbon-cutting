@@ -1,0 +1,47 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "ceremonies": {
+      "$session": {
+        "control": {
+          ".write": "newData.exists() && newData.child('run').isString() && newData.child('run').val().matches(/^r-[a-z0-9]+$/) && newData.child('run').val().length <= 40 && newData.child('run').val() !== data.child('run').val() && newData.child('k').val() === 'forte-z45v6zcq8m' + ':' + newData.child('run').val()",
+          ".validate": "newData.hasChildren(['run', 'rehearsal', 'k'])",
+          "run": { ".read": true },
+          "rehearsal": { ".read": true, ".validate": "newData.isBoolean()" },
+          "k": { ".validate": "newData.isString()" },
+          "$other": { ".validate": false }
+        },
+        "activations": {
+          "$run": {
+            ".read": true,
+            "$pid": {
+              ".write": "!data.exists() && newData.exists() && $pid.matches(/^(sergei|chandana|vannary|kgisl|channtharong)$/) && $run === root.child('ceremonies').child($session).child('control').child('run').val() && !root.child('ceremonies').child($session).child('cut').child($run).exists()",
+              ".validate": "newData.hasChildren(['at'])",
+              "at": { ".validate": "newData.val() === now" },
+              "$other": { ".validate": false }
+            }
+          }
+        },
+        "cut": {
+          "$run": {
+            ".read": true,
+            ".write": "!data.exists() && newData.exists() && $run === root.child('ceremonies').child($session).child('control').child('run').val() && root.child('ceremonies').child($session).child('activations').child($run).hasChildren(['sergei', 'chandana', 'vannary', 'kgisl', 'channtharong'])",
+            ".validate": "newData.hasChildren(['at'])",
+            "at": { ".validate": "newData.val() === now" },
+            "$other": { ".validate": false }
+          }
+        },
+        "presence": {
+          ".read": true,
+          "$pid": {
+            "$conn": {
+              ".write": "$pid.matches(/^(sergei|chandana|vannary|kgisl|channtharong)$/) && $conn.matches(/^c[a-z0-9]+$/) && $conn.length <= 30",
+              ".validate": "newData.isNumber()"
+            }
+          }
+        }
+      }
+    }
+  }
+}
