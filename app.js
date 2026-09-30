@@ -4,7 +4,7 @@
 
    ceremonies/<session>/control      { run, rehearsal, k }   (host only, key-protected)
    ceremonies/<session>/activations/<run>/<participant>  { at }   (create-once)
-   ceremonies/<session>/cut/<run>    { at }   (create-once, only when all participants exist)
+   ceremonies/<session>/cut/<run>    { at }   (create-once, once the starter presses Play)
    ceremonies/<session>/presence/<participant>/<conn>     (who has their page open)
 
    Every reset creates a new <run>, so old activations never count again.
@@ -24,6 +24,7 @@
   var PEOPLE = C.participants || [];
   var IDS = PEOPLE.map(function (p) { return p.id; });
   var TOTAL = IDS.length;
+  var STARTER = String(C.starterId || 'chandana').toLowerCase();   // the only participant who can start the countdown
   var BASE = 'ceremonies/' + SESSION;
   // Phones and tablets get an "I'M READY" button; desktops keep SHIFT + V.
   // Override for testing with ?input=button or ?input=keys.
@@ -126,7 +127,7 @@
       if (!ctx) {
         var AC = window.AudioContext || window.webkitAudioContext;
         if (!AC) return;
-        try { ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination); } catch (e) { ctx = null; return; }
+        try { ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.12; master.connect(ctx.destination); } catch (e) { ctx = null; return; }
         // iOS / Safari only let speech run later if it was first started from a gesture
         try { var u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u); } catch (e) {}
       }
@@ -193,7 +194,7 @@
         try {
           var ss = window.speechSynthesis; if (ss.speaking) ss.cancel();
           var u = new SpeechSynthesisUtterance(text), v = pickVoice();
-          u.lang = 'en-US'; u.rate = 1; u.pitch = 1.05; u.volume = 0.7; if (v) u.voice = v;
+          u.lang = 'en-US'; u.rate = 1; u.pitch = 1.05; u.volume = 0.2; if (v) u.voice = v;
           ss.speak(u);
         } catch (e) {}
       }
@@ -304,17 +305,17 @@
     IDS.forEach(function (id) { if (st.acts && st.acts[id]) n++; });
     return n;
   }
-  // Any client may propose the cut; the database accepts it only once per run
-  // and only when all participants' activations exist.
-  // While our own proposal is in flight we ignore the locally-echoed value and
+  // The cut is never automatic: the starter (STARTER) presses Play on the host screen,
+  // whether or not everyone is ready. The database accepts it only once per run.
+  // While our own request is in flight we ignore the locally-echoed value and
   // only start the ceremony from the server-confirmed record.
   var cutTried = {}, cutPending = {};
-  function proposeCut(st, rerender) {
-    if (!st.run || st.cut || cutTried[st.run] || readyCount(st) !== TOTAL) return;
+  function startCut(st, rerender, onFail) {
+    if (!st.run || st.cut || cutTried[st.run]) return;
     var run = st.run;
     cutTried[run] = true; cutPending[run] = true;
     function done() { cutPending[run] = false; if (rerender) rerender(); }
-    B.set(BASE + '/cut/' + run, { at: B.TS }).then(done, done); // rejected = someone else already wrote it
+    B.set(BASE + '/cut/' + run, { at: B.TS }).then(done, function (e) { cutTried[run] = false; done(); if (onFail) onFail(e); });
   }
   function countNums() {
     var a = [];
@@ -332,6 +333,7 @@
     var hostKey = Q.get('key') || ss('forte-host-key:' + SESSION) || '';
     if (Q.get('key')) ss('forte-host-key:' + SESSION, Q.get('key'));
 
+    var canStart = !!hostKey || Q.get('as') === STARTER;
     var cards = PEOPLE.map(function (p, i) {
       return '<div class="pcard" data-id="' + esc(p.id) + '">' +
         '<i class="pres" title="Participant page open"></i>' +
@@ -357,12 +359,13 @@
         '</section>' +
         tunnelSVG() + ribbonSVG() + scissorsSVG() +
         '<section class="status">' +
-          '<div class="count"><b id="cnt">0</b><span> / ' + TOTAL + ' READY</span></div>' +
+          '<div class="count"><b id="cnt">0</b><span> / ' + TOTAL + ' READY</span>' +
+            (canStart ? '<button type="button" class="play-btn" id="btnPlay" disabled title="Start the countdown" aria-label="Start the countdown"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg></button>' : '') + '</div>' +
           '<div class="segments" id="segs">' + segs + '</div>' +
         '</section>' +
         '<section class="people">' + cards + '</section>' +
         '<footer class="h-foot">Representatives: press <kbd>SHIFT</kbd> + <kbd>V</kbd> on your personal ceremony page</footer>' +
-        '<div class="countdown" id="cd"><div class="cd-msg">ALL ' + TOTAL + ' REPRESENTATIVES CONFIRMED</div><div class="cd-num" id="cdnum"></div></div>' +
+        '<div class="countdown" id="cd"><div class="cd-msg">THE RIBBON CUTTING BEGINS</div><div class="cd-num" id="cdnum"></div></div>' +
         sysHTML() + liveHTML() +
         '<canvas class="fx" id="fx" width="1920" height="1080"></canvas>' +
       '</div></div>' +
@@ -393,6 +396,7 @@
 
     var fx = FX($('#fx'));
     var st = null, seqRun = null, seq = null, initTried = false;
+    if (canStart) $('#btnPlay').onclick = function () { startCut(st, render, function (e) { toast(e && e.code === 'PERMISSION_DENIED' ? 'Start rejected by the database. Republish database.rules.json in Firebase.' : 'Could not start: ' + ((e && e.message) || 'unknown error')); }); };
     st = watchCeremony(render);
 
     function render() {
@@ -402,6 +406,7 @@
       $('#cnt').textContent = String(n);
       $all('#segs span').forEach(function (s, i) { s.classList.toggle('on', i < n); });
       stage.classList.toggle('all-ready', n === TOTAL);
+      if (canStart) { var pb = $('#btnPlay'); pb.disabled = !(st.run && st.connected && !st.cut); pb.style.display = st.cut ? 'none' : ''; }
       $all('.pcard').forEach(function (c) {
         var id = c.getAttribute('data-id');
         var was = c.classList.contains('ready');
@@ -434,7 +439,6 @@
       }
       // run changed (reset) while a sequence was showing: restore everything
       if (seqRun && seqRun !== st.run) cancelSequence();
-      proposeCut(st, render);
       // calm background music from the moment the page is open until the ribbon is cut
       if (st.run && !st.cut) Snd.ambient(true);
       if (cutConfirmed(st) && seqRun !== st.run) startSequence(st.run, st.cut.at);
@@ -826,7 +830,7 @@
     st = watchCeremony(render);
 
     var redirectT = null;
-    function goHost() { location.replace(location.pathname + '?session=' + encodeURIComponent(SESSION) + '&mode=host'); }
+    function goHost() { location.replace(location.pathname + '?session=' + encodeURIComponent(SESSION) + '&mode=host' + (PID === STARTER ? '&as=' + encodeURIComponent(STARTER) : '')); }
     function setView(v, statusHTML) {
       if (view !== v) { view = v; $('#pcard').setAttribute('data-view', v); }
       $('#pstatus').innerHTML = statusHTML;
@@ -840,9 +844,10 @@
       if (!st.loaded) return setView('closed', 'STATUS: <b>CONNECTING</b>');
       if (!st.run) return setView('closed', 'STATUS: <b>NOT OPEN</b>');
       if (seqFor && seqFor !== st.run) { if (seqT) seqT.stop(); seqT = null; seqFor = null; }
-      proposeCut(st, render);
       if (!st.cut) Snd.ambient(true);   // calm music once sound is enabled, until the cut
-      if (TOUCH && cutConfirmed(st)) {
+      // the starter always works from the host screen (that is where the Play button is)
+      if (PID === STARTER && st.acts[PID] && !redirectT && !cutConfirmed(st)) return goHost();
+      if (TOUCH && PID !== STARTER && cutConfirmed(st)) {
         if (seqFor !== st.run) runSeq(st.cut.at);
         return;
       }
@@ -863,8 +868,8 @@
       seqT = Ticker(cutAt);
       var el = B.serverNow() - cutAt;
       if (el >= TL.split) { Snd.ambient(true); setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); return; }
-      setView('seq', 'STATUS: <b class="ok">' + TOTAL + ' / ' + TOTAL + ' READY</b>');
-      $('#pseqmsg').textContent = 'All participants are ready'; $('#pseqnum').textContent = '';
+      setView('seq', 'STATUS: <b class="ok">' + readyCount(st) + ' / ' + TOTAL + ' READY</b>');
+      $('#pseqmsg').textContent = 'The ribbon cutting begins'; $('#pseqnum').textContent = '';
       function showNum(txt) { var n = $('#pseqnum'); n.textContent = txt; n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); }
       seqT.at(TL.count - 700, function () { Snd.duck(true); });
       countNums().forEach(function (x) {
@@ -905,7 +910,7 @@
       var run = st.run;
       sending = run; sendingAt = Date.now(); render();
       B.set(BASE + '/activations/' + run + '/' + PID, { at: B.TS }).then(function () {
-        if (TOUCH) { sending = null; render(); flash('Success! You are ready. Keep this page open.', true); return; }
+        if (TOUCH && PID !== STARTER) { sending = null; render(); flash('Success! You are ready. Keep this page open.', true); return; }
         if (!redirectT) redirectT = setTimeout(goHost, REDIRECT_DELAY);
         sending = null; render();
         // hand over to the shared host screen, where this participant now shows READY
@@ -957,13 +962,12 @@
   function links() {
     document.body.className = 'is-links';
     var base = location.origin + location.pathname;
-    var key = Q.get('key') || '';
     function row(label, url, note) {
       return '<tr><th>' + esc(label) + '</th><td><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a>' + (note ? '<div class="muted">' + note + '</div>' : '') + '</td>' +
         '<td><button type="button" class="copy" data-u="' + esc(url) + '">Copy</button></td></tr>';
     }
-    var hostUrl = base + '?session=' + SESSION + '&mode=host' + (key ? '&key=' + encodeURIComponent(key) : '&key=YOUR-HOST-KEY');
-    var rows = row('HOST SCREEN', hostUrl, 'Keep private. Share this screen in Microsoft Teams.') +
+    var hostUrl = base + '?session=' + SESSION + '&mode=host';
+    var rows = row('HOST SCREEN', hostUrl, 'Keep private. Share this screen in Microsoft Teams. Add &amp;key=&lt;host key&gt; to the link to enable the host controls.') +
       PEOPLE.map(function (p) { return row(p.name, base + '?session=' + SESSION + '&participant=' + p.id); }).join('');
     root.innerHTML = '<div class="links-page"><div class="links-card">' + logoHTML() +
       '<div class="p-eyebrow">CMS – MEDICAL CLAIMS GO-LIVE · CEREMONY LINKS</div>' +

@@ -26,7 +26,7 @@
         "cut": {
           "$run": {
             ".read": true,
-            ".write": "!data.exists() && newData.exists() && $run === root.child('ceremonies').child($session).child('control').child('run').val() && root.child('ceremonies').child($session).child('activations').child($run).hasChildren(['sergei', 'chandana', 'vannary', 'kgisl', 'channtharong', 'chenda', 'nirorn'])",
+            ".write": "!data.exists() && newData.exists() && $run === root.child('ceremonies').child($session).child('control').child('run').val()",
             ".validate": "newData.hasChildren(['at'])",
             "at": { ".validate": "newData.val() === now" },
             "$other": { ".validate": false }
