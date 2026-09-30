@@ -25,6 +25,13 @@
   var IDS = PEOPLE.map(function (p) { return p.id; });
   var TOTAL = IDS.length;
   var BASE = 'ceremonies/' + SESSION;
+  // Phones and tablets get an "I'M READY" button; desktops keep SHIFT + V.
+  // Override for testing with ?input=button or ?input=keys.
+  var INPUT = String(Q.get('input') || '').toLowerCase();
+  var TOUCH = INPUT === 'button' ? true : INPUT === 'keys' ? false :
+    !!(window.matchMedia && window.matchMedia('(hover: none) and (pointer: coarse)').matches);
+  var MUSIC_BACK = 1400; // ms after the confetti bursts before the calm music fades back in
+  var WORDS = ['', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 
   // Ceremony timeline, in ms after the 5th confirmation reaches the server.
   // The countdown runs 10 → 1 (one number per second), then the ribbon cuts.
@@ -52,6 +59,186 @@
   function nameOf(id) { for (var i = 0; i < PEOPLE.length; i++) if (PEOPLE[i].id === id) return PEOPLE[i].name; return id; }
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function ss(k, v) { try { if (v === undefined) return sessionStorage.getItem(k); sessionStorage.setItem(k, v); } catch (e) { return null; } }
+
+  // ---------- Sound (Web Audio + speech, no audio files) ----------
+  // Browsers only allow audio after a user gesture, so arm() listens for the first
+  // click / tap / key press and unlocks everything then.
+  var Snd = (function () {
+    var ctx = null, master = null, sess = null, unlocked = false, muted = false, ducked = false,
+        wanted = false, on = false, chordT = null, fan = null, fanUrl = '', fanState = 'none', fanT0 = 0, holdT = null, pos = 0, nextT = 0, step = 0, cb = null, armed = false;
+    // a slow, soft progression: Cmaj7 · Am · Fmaj7 · G
+    var CHORDS = [[130.81, 196.00, 246.94, 329.63], [110.00, 164.81, 220.00, 261.63],
+                  [87.31, 174.61, 220.00, 329.63], [98.00, 146.83, 196.00, 293.66]];
+    var BELLS = [523.25, 587.33, 659.25, 783.99, 880.00];
+    var GESTURES = ['pointerdown', 'click', 'touchend', 'keydown'];
+
+    function notify() { if (cb) cb(); }
+    function level() { return (ducked ? 0.5 : 1) * 0.15; }   // background music level (1 = full)
+    function note(dest, f, t, dur, peak, atk) {
+      var o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = 'sine'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 8;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(peak, t + atk);
+      g.gain.linearRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(dest); o.start(t); o.stop(t + dur + 0.1);
+    }
+    function chord() {
+      if (!sess) return;
+      var t = Math.max(nextT, ctx.currentTime + 0.05), c = CHORDS[step++ % CHORDS.length];
+      c.forEach(function (f, i) { note(sess.lp, f, t + i * 0.12, 8, 0.045, 2.5); });
+      for (var k = 0; k < 2; k++) note(sess.lp, BELLS[(Math.random() * BELLS.length) | 0], t + 1.5 + k * 2.2 + Math.random() * 0.8, 3.2, 0.022, 0.03);
+      nextT = t + 6;
+    }
+    function apply() {
+      if (!ctx || !unlocked) return;
+      var want = wanted && !muted, now = ctx.currentTime, g;
+      // give the music file a moment to download and decode before falling back to the synth pad
+      if (want && !on && fanState === 'loading' && Date.now() - fanT0 < 10000) { clearTimeout(holdT); holdT = setTimeout(apply, 250); return; }
+      if (want && !on) {
+        on = true; nextT = 0; sess = { out: ctx.createGain(), lp: ctx.createBiquadFilter() };
+        sess.lp.type = 'lowpass'; sess.lp.frequency.value = 1800;
+        sess.lp.connect(sess.out); sess.out.connect(master);
+        sess.out.gain.setValueAtTime(0.0001, now); sess.out.gain.linearRampToValueAtTime(level(), now + 3);
+        if (fan) {
+          // the music track: loops, and picks up where it left off after the cut
+          sess.src = ctx.createBufferSource(); sess.src.buffer = fan; sess.src.loop = true;
+          sess.off = pos % fan.duration; sess.t0 = now;
+          sess.src.connect(sess.out); sess.src.start(now, sess.off);
+        } else {
+          chord();
+          chordT = setInterval(function () { if (on && nextT - ctx.currentTime < 2) chord(); }, 500);
+        }
+      } else if (!want && on) {
+        on = false; clearInterval(chordT);
+        var s = sess; sess = null; g = s.out.gain;
+        if (s.src) { pos = s.off + (now - s.t0); try { s.src.stop(now + 1.6); } catch (e) {} }
+        g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(0.0001, now + 1.5);
+        setTimeout(function () { try { s.out.disconnect(); } catch (e) {} }, 1800);
+      } else if (want && on) {
+        g = sess.out.gain; g.cancelScheduledValues(now); g.setValueAtTime(g.value, now); g.linearRampToValueAtTime(level(), now + 1.2);
+      }
+    }
+    // Audio can start without a click if the browser allows it, but speech (the countdown voice)
+    // also needs the page to have been clicked / tapped / typed on at least once.
+    function ready() { return unlocked && (!navigator.userActivation || navigator.userActivation.hasBeenActive); }
+    function disarm() { if (!armed) return; armed = false; GESTURES.forEach(function (e) { document.removeEventListener(e, unlock, true); }); }
+    function unlock() {
+      if (!ctx) {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) return;
+        try { ctx = new AC(); master = ctx.createGain(); master.gain.value = 0.5; master.connect(ctx.destination); } catch (e) { ctx = null; return; }
+        // iOS / Safari only let speech run later if it was first started from a gesture
+        try { var u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u); } catch (e) {}
+      }
+      function after() {
+        if (ctx.state === 'running' && !unlocked) { unlocked = true; loadFan(); apply(); }
+        if (ready()) disarm();
+        notify();
+      }
+      if (ctx.state === 'running') after(); else ctx.resume().then(after, after);
+    }
+    // balloon burst: a sharp rubbery crack, a deep low thump and a short airy rush
+    function one(t, v) {
+      var sr = ctx.sampleRate, len = Math.floor(sr * 0.35), buf = ctx.createBuffer(1, len, sr), d = buf.getChannelData(0);
+      for (var j = 0; j < len; j++) {
+        var k = j / len;
+        d[j] = (Math.random() * 2 - 1) * (Math.pow(1 - k, 14) * 1.0 + Math.pow(1 - k, 3) * 0.22);   // crack, then rush
+      }
+      var src = ctx.createBufferSource(), lp = ctx.createBiquadFilter(), g = ctx.createGain();
+      src.buffer = buf; lp.type = 'lowpass'; lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(500, t + 0.3);
+      g.gain.value = 0.55 * v;
+      src.connect(lp); lp.connect(g); g.connect(master); src.start(t);
+      var o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = 'sine'; o.frequency.setValueAtTime(170 + Math.random() * 30, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.22);
+      og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.6 * v, t + 0.005); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      o.connect(og); og.connect(master); o.start(t); o.stop(t + 0.32);
+    }
+    // Background music file (config.js › musicUrl), decoded up front so it starts instantly.
+    function loadFan() {
+      if (!fanUrl || fanState !== 'none' || !ctx || !window.fetch) return;
+      fanState = 'loading'; fanT0 = Date.now();
+      fetch(fanUrl).then(function (r) { if (!r.ok) throw 0; return r.arrayBuffer(); })
+        .then(function (ab) { return new Promise(function (ok, no) { ctx.decodeAudioData(ab, ok, no); }); })
+        .then(function (b) { fan = b; fanState = 'ready'; }, function () { fanState = 'failed'; });
+    }
+    function pickVoice() {
+      var vs = (window.speechSynthesis && window.speechSynthesis.getVoices()) || [], best = null;
+      vs.forEach(function (v) {
+        if (!/^en/i.test(v.lang)) return;
+        if (/Samantha|Google US English|Google UK English Female|Aria|Jenny|Zira|Karen|Serena/i.test(v.name)) { if (!best || !best.pref) best = { v: v, pref: true }; }
+        else if (!best) best = { v: v, pref: false };
+      });
+      return best && best.v;
+    }
+    return {
+      // call once on pages that should make sound; cb fires whenever the state changes
+      arm: function (onChange) {
+        cb = onChange; if (armed || unlocked) return; armed = true;
+        GESTURES.forEach(function (e) { document.addEventListener(e, unlock, true); });
+        unlock();   // on load: if the browser already allows autoplay for this site, sound starts with no prompt at all
+        document.addEventListener('visibilitychange', function () { if (ctx && unlocked && ctx.state !== 'running') ctx.resume().catch(function () {}); });
+      },
+      unlock: unlock,
+      state: function () { return !ready() ? 'locked' : muted ? 'muted' : 'on'; },
+      setMuted: function (m) { muted = !!m; if (muted) { try { window.speechSynthesis.cancel(); } catch (e) {} } apply(); notify(); },
+      ambient: function (v) { v = !!v; if (wanted === v) return; wanted = v; if (!v) ducked = false; apply(); },
+      duck: function (v) { v = !!v; if (ducked === v) return; ducked = v; apply(); },
+      setFanfare: function (url) { fanUrl = url || ''; loadFan(); },
+      pop: function (n) {
+        if (!unlocked || muted) return;
+        for (var i = 0; i < (n || 1); i++) one(ctx.currentTime + 0.02 + i * (0.1 + Math.random() * 0.08), 1 - i * 0.12);
+      },
+      say: function (text) {
+        if (!unlocked || muted || !window.speechSynthesis) return;
+        try {
+          var ss = window.speechSynthesis; if (ss.speaking) ss.cancel();
+          var u = new SpeechSynthesisUtterance(text), v = pickVoice();
+          u.lang = 'en-US'; u.rate = 1; u.pitch = 1.05; u.volume = 0.7; if (v) u.voice = v;
+          ss.speak(u);
+        } catch (e) {}
+      }
+    };
+  })();
+
+  // Notification shown on every screen until sound is enabled. One click on it unlocks audio,
+  // and the music then starts by itself (the page already asked for it), so nobody has to hunt for a setting.
+  function soundBanner() {
+    Snd.setFanfare(C.musicUrl);
+    if (!C.showSoundPrompt) { Snd.arm(function () {}); return; }   // silent mode: sound starts on the first click / tap / key press
+    var el = document.createElement('div');
+    el.className = 'snd-banner'; el.setAttribute('role', 'alert');
+    el.innerHTML = '<span class="snd-ico" aria-hidden="true">🔊</span>' +
+      '<span class="snd-txt"><b>Turn on sound</b><span>Music, countdown voice and celebration</span></span>' +
+      '<button type="button">Enable sound</button>';
+    document.body.appendChild(el);
+    el.querySelector('button').onclick = function () { Snd.unlock(); };
+    function refresh() { el.classList.toggle('show', Snd.state() === 'locked'); }
+    Snd.arm(refresh); refresh();
+  }
+
+  // ---------- Shared clock-driven timeline ----------
+  // Events fire when the *server* clock passes cutAt + t (ms), polled every 30 ms, so every
+  // screen lands on the same instant and a throttled or refreshed tab just catches up.
+  // lateMs: if we join more than that late, skip the event instead of firing it stale.
+  function Ticker(cutAt) {
+    var evs = [], iv = null, dead = false, el0 = B.serverNow() - cutAt;
+    function tick() {
+      var e = B.serverNow() - cutAt, left = 0, list = evs;
+      for (var i = 0; i < list.length; i++) {
+        var v = list[i];
+        if (dead) return;
+        if (v.done) continue;
+        if (e >= v.t) { v.done = true; try { v.fn(); } catch (x) {} } else left++;
+      }
+      if (!left && iv) { clearInterval(iv); iv = null; }
+    }
+    return {
+      at: function (t, fn, lateMs) { evs.push({ t: t, fn: fn, done: lateMs != null && t < el0 - lateMs }); },
+      after: function (ms, fn) { this.at(el0 + ms, fn); },
+      start: function () { evs.sort(function (a, b) { return a.t - b.t; }); tick(); if (!iv) iv = setInterval(tick, 30); },
+      stop: function () { dead = true; if (iv) clearInterval(iv); iv = null; evs = []; }
+    };
+  }
 
   // ---------- Logo area (see config.js › logoUrl) ----------
   function logoHTML(cls) {
@@ -187,12 +374,16 @@
       '</div>') + modalHTML();
     fixLogoFallbacks();
 
-    var stage = $('#stage');
+    var stage = $('#stage'), wrap = $('.stage-wrap');
+    // Portrait phones: turn the 16:9 stage on its side so it fills the screen (tilt the phone).
     function fit() {
-      var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
-      stage.style.setProperty('--s', s);
+      var w = window.innerWidth, h = window.innerHeight, rot = w < h && w < 900;
+      wrap.classList.toggle('rot', rot);
+      stage.style.setProperty('--s', rot ? Math.min(h / 1920, w / 1080) : Math.min(w / 1920, h / 1080));
     }
     fit(); window.addEventListener('resize', fit);
+
+    soundBanner();
 
     // discreet controls: visible on mouse move, fade after 3 s
     var idleT;
@@ -201,7 +392,7 @@
     wake();
 
     var fx = FX($('#fx'));
-    var st = null, seqRun = null, timers = [], initTried = false;
+    var st = null, seqRun = null, seq = null, initTried = false;
     st = watchCeremony(render);
 
     function render() {
@@ -244,6 +435,8 @@
       // run changed (reset) while a sequence was showing: restore everything
       if (seqRun && seqRun !== st.run) cancelSequence();
       proposeCut(st, render);
+      // calm background music from the moment the page is open until the ribbon is cut
+      if (st.run && !st.cut) Snd.ambient(true);
       if (cutConfirmed(st) && seqRun !== st.run) startSequence(st.run, st.cut.at);
     }
 
@@ -281,42 +474,50 @@
     }
 
     // ---------- the one-time ceremony sequence ----------
-    function at(ms, fn) { timers.push(setTimeout(fn, Math.max(0, ms))); }
     function showNum(n) {
       var el = $('#cdnum'); el.textContent = n;
       el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
     }
     function startSequence(run, cutAt) {
       seqRun = run;
-      timers.forEach(clearTimeout); timers = [];
+      if (seq) seq.stop();
+      seq = Ticker(cutAt);
       var el = B.serverNow() - cutAt;
       var s = stage.classList;
       s.add('locked');
       if (el >= TL.live) {                 // host refreshed after the cut → final screen
+        Snd.ambient(true);
         s.add('seq-split', 'seq-live', 'instant');
         fx.rain(true);
         return;
       }
       if (el >= TL.cut) {                  // refreshed during the cut → ribbon already cut
+        Snd.ambient(false);
+        seq.at(TL.split + MUSIC_BACK, function () { Snd.ambient(true); });
         s.add('seq-split', 'instant');
-        at(80, function () { s.remove('instant'); });
-        if (SYS && el >= TL.sys) s.add('seq-sys');
-        else if (SYS) at(TL.sys - el, function () { s.add('seq-sys'); });
-        at(TL.live - el, function () { s.add('seq-live'); fx.confetti(90); fx.rain(true); });
+        seq.after(80, function () { s.remove('instant'); });
+        if (SYS) seq.at(TL.sys, function () { s.add('seq-sys'); });
+        seq.at(TL.live, function () { s.add('seq-live'); fx.confetti(90); fx.rain(true); });
+        seq.start();
         return;
       }
       s.add('seq-lock');
+      seq.at(TL.count - 700, function () { Snd.duck(true); });   // music dips under the voice
       countNums().forEach(function (x, i) {
-        at(x[1] - el, function () { if (i === 0) s.add('seq-count'); showNum(x[0]); });
+        seq.at(x[1], function () { if (i === 0) s.add('seq-count'); showNum(x[0]); }, 1000);
+        seq.at(x[1] - 150, function () { Snd.say(WORDS[+x[0]]); }, 300);   // voice leads a touch for speech latency
       });
-      at(TL.cut - el, function () { s.add('seq-cut'); });
-      at(TL.close - el, function () { s.add('seq-close'); });
-      at(TL.split - el, function () { s.add('seq-split'); fx.sparks(CUT_X, 534); fx.confetti(170); });
-      if (SYS) at(TL.sys - el, function () { s.add('seq-sys'); fx.confetti(60); });
-      at(TL.live - el, function () { s.add('seq-live'); fx.rain(true); });
+      seq.at(TL.cut, function () { s.add('seq-cut'); Snd.ambient(false); });
+      seq.at(TL.close, function () { s.add('seq-close'); });
+      seq.at(TL.split, function () { s.add('seq-split'); fx.sparks(CUT_X, 534); fx.confetti(170); Snd.pop(2); });
+      seq.at(TL.split + MUSIC_BACK, function () { Snd.ambient(true); });   // calm music returns after the bursts and carries on through the final page
+      if (SYS) seq.at(TL.sys, function () { s.add('seq-sys'); fx.confetti(60); });
+      seq.at(TL.live, function () { s.add('seq-live'); fx.rain(true); });
+      seq.start();
     }
     function cancelSequence() {
-      timers.forEach(clearTimeout); timers = [];
+      if (seq) seq.stop(); seq = null;
+      Snd.duck(false);
       seqRun = null;
       stage.classList.add('instant');
       ['locked', 'seq-lock', 'seq-count', 'seq-cut', 'seq-close', 'seq-split', 'seq-sys', 'seq-live'].forEach(function (c) { stage.classList.remove(c); });
@@ -568,7 +769,7 @@
   // PARTICIPANT
   // =====================================================================
   function participant() {
-    document.body.className = 'is-participant theme-' + THEME;
+    document.body.className = 'is-participant theme-' + THEME + (TOUCH ? ' touch' : '');
     var name = nameOf(PID);
     document.title = name + ' · Ribbon cutting';
     root.innerHTML =
@@ -578,8 +779,14 @@
         '<div class="p-name">' + esc(name) + '</div>' +
         '<div class="p-body" id="pbody">' +
           '<div class="v-wait">' +
-            '<div class="p-press">PRESS</div>' +
-            '<div class="keys"><kbd class="k-shift" id="kShift">SHIFT</kbd><span class="plus">+</span><kbd class="k-v" id="kV">V</kbd></div>' +
+            '<div class="only-keys">' +
+              '<div class="p-press">PRESS</div>' +
+              '<div class="keys"><kbd class="k-shift" id="kShift">SHIFT</kbd><span class="plus">+</span><kbd class="k-v" id="kV">V</kbd></div>' +
+            '</div>' +
+            '<div class="only-touch">' +
+              '<div class="p-press">TAP WHEN READY</div>' +
+              '<button type="button" class="ready-btn" id="btnReady" disabled>I\'M READY</button>' +
+            '</div>' +
             '<div class="p-to">TO CUT THE RIBBON</div>' +
           '</div>' +
           '<div class="v-ready">' +
@@ -595,8 +802,10 @@
           '<div class="v-closed"><div class="p-press small">The ceremony is not open yet</div><p class="muted">Please keep this page open. It will update automatically.</p></div>' +
         '</div>' +
         '<div class="p-status" id="pstatus">STATUS: <b>WAITING</b></div>' +
-        '<div class="p-foot"><span id="pconn"><i class="dot"></i>Connecting…</span><span>Session ' + esc(SESSION) + '</span></div>' +
+        '<div class="p-foot"><span id="pconn"><i class="dot"></i>Connecting…</span>' +
+          '<span>Session ' + esc(SESSION) + '</span></div>' +
       '</div>' +
+      '<div class="offline-banner" id="offBanner" role="alert"></div>' +
       '<div class="focus-hint" id="fhint">Click anywhere on this page so it can detect your keyboard</div>' +
       '<div class="p-msg" id="pmsg"></div></div>';
     fixLogoFallbacks();
@@ -606,8 +815,14 @@
 
     var sending = null, sendingAt = 0;   // run id a write is in flight for
     var view = '';
-    var seqFor = null, seqTimers = [];
+    var seqFor = null, seqT = null;
     var st = null;
+    soundBanner();
+    // Phones stay on this page for the countdown (with voice + sound) instead of
+    // being sent to the host screen, which is laid out for a wide display.
+    if (TOUCH) {
+      $('#btnReady').onclick = function () { if (navigator.vibrate) { try { navigator.vibrate(40); } catch (e) {} } activate(); };
+    }
     st = watchCeremony(render);
 
     var redirectT = null;
@@ -619,11 +834,18 @@
     function render() {
       if (!st) return;
       $('#pconn').innerHTML = st.connected ? '<i class="dot ok"></i>Connected' : '<i class="dot bad"></i>Reconnecting…';
+      connBanner();
       $('#ppage').classList.toggle('rehearsal', !!st.rehearsal);
+      $('#btnReady').disabled = !st.connected || !st.loaded || !st.run || !!st.cut || !!st.acts[PID] || sending === st.run;
       if (!st.loaded) return setView('closed', 'STATUS: <b>CONNECTING</b>');
       if (!st.run) return setView('closed', 'STATUS: <b>NOT OPEN</b>');
-      if (seqFor && seqFor !== st.run) { seqTimers.forEach(clearTimeout); seqTimers = []; seqFor = null; }
+      if (seqFor && seqFor !== st.run) { if (seqT) seqT.stop(); seqT = null; seqFor = null; }
       proposeCut(st, render);
+      if (!st.cut) Snd.ambient(true);   // calm music once sound is enabled, until the cut
+      if (TOUCH && cutConfirmed(st)) {
+        if (seqFor !== st.run) runSeq(st.cut.at);
+        return;
+      }
       if (cutConfirmed(st)) {
         // the countdown belongs on the host screen: keep showing READY while our own
         // redirect is pending, otherwise (refresh, late open) go there straight away
@@ -634,26 +856,56 @@
       if (st.acts[PID]) return setView('ready', 'STATUS: <b class="ok">READY ✓</b>');
       setView('wait', 'STATUS: <b>WAITING</b>');
     }
+    // Phone countdown, driven by the same server-clock timeline as the host screen.
     function runSeq(cutAt) {
       seqFor = st.run;
+      if (seqT) seqT.stop();
+      seqT = Ticker(cutAt);
       var el = B.serverNow() - cutAt;
-      function atT(ms, fn) { seqTimers.push(setTimeout(fn, Math.max(0, ms - el))); }
-      if (el >= TL.split) { setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); return; }
+      if (el >= TL.split) { Snd.ambient(true); setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); return; }
       setView('seq', 'STATUS: <b class="ok">' + TOTAL + ' / ' + TOTAL + ' READY</b>');
       $('#pseqmsg').textContent = 'All participants are ready'; $('#pseqnum').textContent = '';
-      countNums().concat([['CUT!', TL.cut]]).forEach(function (x) {
-        atT(x[1], function () { var n = $('#pseqnum'); n.textContent = x[0]; n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); });
+      function showNum(txt) { var n = $('#pseqnum'); n.textContent = txt; n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); }
+      seqT.at(TL.count - 700, function () { Snd.duck(true); });
+      countNums().forEach(function (x) {
+        seqT.at(x[1], function () { showNum(x[0]); }, 1000);
+        seqT.at(x[1] - 150, function () { Snd.say(WORDS[+x[0]]); }, 300);
       });
-      atT(TL.split + 600, function () { setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); });
+      seqT.at(TL.cut, function () { showNum('CUT!'); Snd.ambient(false); }, 1000);
+      seqT.at(TL.split, function () { Snd.pop(2); }, 600);
+      seqT.at(TL.split + MUSIC_BACK, function () { Snd.ambient(true); });
+      seqT.at(TL.split + 600, function () { setView('live', 'STATUS: <b class="ok">RIBBON CUT ✓</b>'); });
+      seqT.start();
     }
 
+    // "You're offline" banner: appears if the connection stays down for 1.5 s (no flash at page load),
+    // and confirms briefly when it comes back.
+    var offT = null, wasOff = false, backT = null;
+    function connBanner() {
+      var b = $('#offBanner');
+      if (st.connected) {
+        clearTimeout(offT); offT = null;
+        if (wasOff) {
+          wasOff = false; b.textContent = 'Back online ✓'; b.className = 'offline-banner show ok';
+          clearTimeout(backT); backT = setTimeout(function () { b.classList.remove('show'); }, 2500);
+        }
+      } else if (!offT && !wasOff) {
+        offT = setTimeout(function () {
+          offT = null; if (st.connected) return;
+          wasOff = true; clearTimeout(backT);
+          b.textContent = 'You\'re offline. Reconnecting…'; b.className = 'offline-banner show';
+        }, 1500);
+      }
+    }
     function activate() {
       if (!st.loaded || !st.run || st.cut || st.acts[PID]) return;
+      if (!st.connected) { flash('You\'re offline. Wait for the connection to return, then try again.'); return; }
       // a write is already in flight; allow a manual retry only if it is taking unusually long
       if (sending && Date.now() - sendingAt < 6000) return;
       var run = st.run;
       sending = run; sendingAt = Date.now(); render();
       B.set(BASE + '/activations/' + run + '/' + PID, { at: B.TS }).then(function () {
+        if (TOUCH) { sending = null; render(); flash('Success! You are ready. Keep this page open.', true); return; }
         if (!redirectT) redirectT = setTimeout(goHost, REDIRECT_DELAY);
         sending = null; render();
         // hand over to the shared host screen, where this participant now shows READY
@@ -661,7 +913,7 @@
         // (after a short pause so the participant sees their READY status first)
       }).catch(function (e) {
         sending = null;
-        if (!st.acts[PID]) flash(e.code === 'PERMISSION_DENIED' ? 'Signal not accepted — the ceremony was reset or is closed. Please wait for the MC.' : 'Could not send. Check your connection and press SHIFT + V again.');
+        if (!st.acts[PID]) flash(e.code === 'PERMISSION_DENIED' ? 'Signal not accepted — the ceremony was reset or is closed. Please wait for the MC.' : 'Could not send. Check your connection and ' + (TOUCH ? 'tap I\'M READY' : 'press SHIFT + V') + ' again.');
         render();
       });
     }
@@ -676,6 +928,7 @@
     function isV(e) { return e.code === 'KeyV' || (e.key && e.key.length === 1 && e.key.toLowerCase() === 'v'); }
     function isShift(e) { return e.key === 'Shift' || e.code === 'ShiftLeft' || e.code === 'ShiftRight'; }
     function paintKeys() { $('#kShift').classList.toggle('down', held.shift); $('#kV').classList.toggle('down', held.v); }
+    // (phones never see the keys, but the listeners stay so an iPad with a keyboard still works)
     document.addEventListener('keydown', function (e) {
       var fresh = !e.repeat;
       if (isShift(e)) held.shift = true;
@@ -693,7 +946,7 @@
     window.addEventListener('blur', releaseAll);
 
     // Remind the participant to click into the page if it lost keyboard focus.
-    function focusCheck() { $('#fhint').classList.toggle('show', !document.hasFocus() && (view === 'wait')); }
+    function focusCheck() { $('#fhint').classList.toggle('show', !TOUCH && !document.hasFocus() && (view === 'wait')); }
     window.addEventListener('focus', focusCheck); window.addEventListener('blur', focusCheck);
     setInterval(focusCheck, 700);
   }

@@ -24,6 +24,14 @@ window.FORTE_CONFIG = {
      --------------------------------------------------------------- */
   defaultSession: "cms-medical-2026",
 
+  /* Background music (an mp3 in assets/): plays until the ribbon is cut, goes quiet for the
+     balloon bursts, then carries on through the final page. Missing file = a soft built-in pad. */
+  musicUrl: "assets/alex-morgan-event-grand-opening-fanfare-578493.mp3",
+
+  /* Show an on-page "Enable sound" notification until sound is unlocked?
+     false = no notification; sound starts on the page's first click / tap / key press. */
+  showSoundPrompt: false,
+
   /* Visual theme used when a URL has no ?theme= (only "light" is styled) */
   theme: "light",
 
@@ -65,10 +73,10 @@ window.FORTE_CONFIG = {
      5. CEREMONY TEXT (optional tweaks)
      --------------------------------------------------------------- */
   text: {
-    system: "CMS – MEDICAL CLAIMS",
+    system: "CMS – MEDICAL",
     title: "CMS – MEDICAL SYSTEM LAUNCH",
     date: "01 OCTOBER 2026",
-    subtitle: "Transforming Medical Claims - Together",
+    subtitle: "Transforming Medical Claims Management - Together",
     liveLine1: "Six months of teamwork, commitment and collaboration.",
     liveLine2: "Thank you to everyone who made this possible.",
     liveMotto: "One Team. One Journey. One Successful Go-Live."
