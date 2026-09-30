@@ -67,7 +67,7 @@
   // click / tap / key press and unlocks everything then.
   var Snd = (function () {
     var ctx = null, master = null, sess = null, unlocked = false, muted = false, ducked = false,
-        wanted = false, forced = false, on = false, chordT = null, fan = null, fanUrl = '', fanState = 'none', fanT0 = 0, fin = null, finUrl = '', finState = 'none', holdT = null, pos = 0, nextT = 0, step = 0, cb = null, armed = false;
+        wanted = false, forced = false, userVol = 1, on = false, chordT = null, fan = null, fanUrl = '', fanState = 'none', fanT0 = 0, fin = null, finUrl = '', finState = 'none', holdT = null, pos = 0, nextT = 0, step = 0, cb = null, armed = false;
     // a slow, soft progression: Cmaj7 · Am · Fmaj7 · G
     var CHORDS = [[130.81, 196.00, 246.94, 329.63], [110.00, 164.81, 220.00, 261.63],
                   [87.31, 174.61, 220.00, 329.63], [98.00, 146.83, 196.00, 293.66]];
@@ -75,7 +75,7 @@
     var GESTURES = ['pointerdown', 'click', 'touchend', 'keydown'];
 
     function notify() { if (cb) cb(); }
-    function level() { return (ducked ? 0.5 : 1) * 0.195; }   // background music level (1 = full)
+    function level() { return (ducked ? 0.5 : 1) * 0.195 * userVol; }   // background music level (1 = full)
     function note(dest, f, t, dur, peak, atk) {
       var o = ctx.createOscillator(), g = ctx.createGain();
       o.type = 'sine'; o.frequency.value = f; o.detune.value = (Math.random() - 0.5) * 8;
@@ -191,6 +191,8 @@
       unlock: unlock,
       state: function () { return !ready() ? 'locked' : muted ? 'muted' : 'on'; },
       isMuted: function () { return muted; },
+      // background-music loudness from the host's slider: 0 (silent) … 8 (eight times), 1 = default
+      setLevel: function (v) { userVol = Math.max(0, Math.min(8, +v || 0)); apply(); },
       setMuted: function (m) { muted = !!m; apply(); notify(); },   // mutes only the pre-cut background music
       ambient: function (v) { v = !!v; var wasForced = forced; forced = false; if (wanted === v && !wasForced) return; wanted = v; if (!v) ducked = false; apply(); },
       // the music for the celebration + final page: the mute button (first page only) no longer applies
@@ -378,7 +380,9 @@
         '</section>' +
         tunnelSVG() + ribbonSVG() + scissorsSVG() +
         '<section class="status">' +
-          '<div class="count"><button type="button" class="snd-btn" id="btnSnd" aria-label="Mute sound" title="Mute / unmute sound">' + SND_ON + '</button><b id="cnt">0</b><span> / ' + TOTAL + ' READY</span>' +
+          '<div class="count"><span class="snd-box" id="sndBox"><button type="button" class="snd-btn" id="btnSnd" aria-label="Background music volume" title="Background music volume">' + SND_ON + '</button>' +
+            '<span class="snd-pop" id="sndPop"><input type="range" class="snd-range" id="sndRange" min="0" max="100" step="1" value="50" aria-label="Background music volume" title="Background music volume"></span></span>' +
+            '<b id="cnt">0</b><span> / ' + TOTAL + ' READY</span>' +
             (canStart ? '<button type="button" class="play-btn" id="btnPlay" disabled title="Start the countdown" aria-label="Start the countdown"><svg viewBox="0 0 24 24" width="30" height="30"><path d="M7 4.5v15l13-7.5z" fill="currentColor"/></svg></button>' : '') + '</div>' +
           '<div class="segments" id="segs">' + segs + '</div>' +
         '</section>' +
@@ -415,10 +419,25 @@
 
     var fx = FX($('#fx'));
     var st = null, seqRun = null, seq = null, initTried = false;
-    $('#btnSnd').onclick = function () {
-      var m = !Snd.isMuted(); Snd.setMuted(m);
-      this.innerHTML = m ? SND_OFF : SND_ON; this.classList.toggle('off', m); this.setAttribute('aria-label', m ? 'Unmute sound' : 'Mute sound');
+    var rng = $('#sndRange'), sndBtn = $('#btnSnd'), sndPop = $('#sndPop');
+    function sndUI() {
+      var v = +rng.value;
+      sndBtn.innerHTML = v === 0 ? SND_OFF : SND_ON;
+      rng.style.setProperty('--v', v + '%');
+    }
+    try { var sv = localStorage.getItem('forte-bg-vol'); if (sv !== null && +sv >= 0 && +sv <= 100) rng.value = sv; } catch (e) {}
+    function volOf(v) { v = +v; return v <= 50 ? v / 50 : 1 + (v - 50) / 50 * 7; }   // middle = default, top = 8x louder
+    Snd.setLevel(volOf(rng.value));
+    // click the speaker to open the vertical volume slider; click anywhere else to hide it
+    sndBtn.onclick = function (e) { e.stopPropagation(); sndPop.classList.toggle('open'); };
+    sndPop.onclick = function (e) { e.stopPropagation(); };
+    document.addEventListener('click', function () { sndPop.classList.remove('open'); });
+    rng.oninput = function () {
+      Snd.setLevel(volOf(rng.value));
+      try { localStorage.setItem('forte-bg-vol', rng.value); } catch (e) {}
+      sndUI();
     };
+    sndUI();
     if (canStart) $('#btnPlay').onclick = function () { startCut(st, render, function (e) { toast(e && e.code === 'PERMISSION_DENIED' ? 'Start rejected by the database. Republish database.rules.json in Firebase.' : 'Could not start: ' + ((e && e.message) || 'unknown error')); }); };
     st = watchCeremony(render);
 
@@ -430,7 +449,7 @@
       $all('#segs span').forEach(function (s, i) { s.classList.toggle('on', i < n); });
       stage.classList.toggle('all-ready', n === TOTAL);
       if (canStart) { var pb = $('#btnPlay'); pb.disabled = !(st.run && st.connected && !st.cut); pb.style.display = st.cut ? 'none' : ''; }
-      $('#btnSnd').style.display = st.cut ? 'none' : '';
+      $('#sndBox').style.display = st.cut ? 'none' : '';
       $all('.pcard').forEach(function (c) {
         var id = c.getAttribute('data-id');
         var was = c.classList.contains('ready');

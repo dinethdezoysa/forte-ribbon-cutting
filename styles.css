@@ -104,9 +104,16 @@ body.is-host.idle { cursor: none; }
 .status { position: absolute; top: 740px; left: 0; right: 0; text-align: center; }
 .status-label { font-size: 18px; letter-spacing: .34em; color: var(--navy2); font-weight: 500; margin-left: .34em; }
 .count { margin-top: 2px; font-size: 40px; font-weight: 600; letter-spacing: .04em; color: var(--navy); }
-.snd-btn { vertical-align: middle; margin-right: 18px; width: 40px; height: 40px; border-radius: 50%; padding: 0; cursor: pointer; position: relative; top: -2px;
-  display: inline-flex; align-items: center; justify-content: center; color: #fff; background: var(--red); border: 0;
+.snd-box { display: inline-flex; align-items: center; vertical-align: middle; margin-right: 18px; position: relative; top: -2px; }
+.snd-btn { margin-right: 0; width: 40px; height: 40px; border-radius: 50%; padding: 0; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: #fff; background: var(--red); border: 0;
   box-shadow: 0 4px 10px rgba(120,0,35,.35); transition: background .2s, color .2s, transform .12s; }
+.snd-pop { position: absolute; left: 0; bottom: 52px; width: 40px; height: 168px; border-radius: 20px; background: #fff; border: 1px solid #D5E6ED;
+  box-shadow: 0 8px 20px rgba(20,60,90,.22); opacity: 0; visibility: hidden; transform: translateY(8px); transition: opacity .2s, transform .2s, visibility .2s; }
+.snd-pop.open { opacity: 1; visibility: visible; transform: translateY(0); }
+.snd-range { position: absolute; left: 50%; top: 50%; margin: 0; transform: translate(-50%, -50%) rotate(-90deg); -webkit-appearance: none; appearance: none; width: 130px; height: 6px; border-radius: 3px; outline: none; cursor: pointer; --v: 50%;
+  background: linear-gradient(90deg, var(--red) var(--v), #CBD8DF var(--v)); }
+.snd-range::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--red); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(120,0,35,.45); }
+.snd-range::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--red); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(120,0,35,.45); }
 .snd-btn:hover { background: var(--red-d); }
 .snd-btn:active { transform: scale(.94); box-shadow: 0 2px 5px rgba(120,0,35,.35); }
 .play-btn { vertical-align: middle; margin-left: 18px; width: 40px; height: 40px; border-radius: 50%; border: 0; padding: 0; cursor: pointer; position: relative; top: -2px;
